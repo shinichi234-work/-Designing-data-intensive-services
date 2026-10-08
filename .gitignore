@@ -1,0 +1,10 @@
+venv/
+.venv/
+Lib/
+Scripts/
+pyvenv.cfg
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+.DS_Store
