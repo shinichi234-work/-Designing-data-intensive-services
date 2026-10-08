@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+asyncpg
+faker
+locust
+requests
+pandas
+matplotlib
