@@ -1,25 +1,31 @@
 import asyncio
 import random
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+
 from app import models
 from app.database import engine
+from app.init_db import create_tables
 
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
+CATEGORIES = ["electronics", "books", "clothes", "home", "sports"]
+
 
 async def seed_data():
+    await create_tables()
     async with async_session() as session:
-        result = await session.execute(select(func.count(models.User.id)))
-        users_count = result.scalar()
-
+        users_count = (
+            await session.execute(select(func.count(models.User.id)))
+        ).scalar()
         if users_count > 0:
-            print(" БД уже заполнена (найдены пользователи). Пропускаем сидинг.")
+            print("БД уже заполнена, пропускаем сидинг.")
             return
 
         print("Создание пользователей (1 000)...")
         users = [
-            models.User(username=f"user_{i}", email=f"user_{i}@example.com")
+            models.User(name=f"user_{i}", email=f"user_{i}@example.com")
             for i in range(1, 1001)
         ]
         session.add_all(users)
@@ -28,9 +34,12 @@ async def seed_data():
         print("Создание товаров (500)...")
         products = [
             models.Product(
+                sku=f"SKU-{i:05d}",
                 name=f"Product {i}",
+                description=f"Description of product {i}",
                 price=round(random.uniform(10.0, 1000.0), 2),
                 stock=random.randint(10, 500),
+                category=random.choice(CATEGORIES),
             )
             for i in range(1, 501)
         ]
@@ -44,33 +53,28 @@ async def seed_data():
         for i in range(1, 10001):
             order = models.Order(
                 user_id=random.choice(user_ids),
-                status=random.choice(
-                    ["pending", "completed", "shipped", "cancelled"]
-                ),
+                status=random.choice(["pending", "completed", "shipped", "cancelled"]),
             )
             session.add(order)
             await session.flush()
 
             for _ in range(random.randint(1, 5)):
-                item = models.OrderItem(
-                    order_id=order.id,
-                    product_id=random.choice(product_ids),
-                    quantity=random.randint(1, 5),
-                    price=round(random.uniform(10.0, 500.0), 2),
+                session.add(
+                    models.OrderItem(
+                        order_id=order.id,
+                        product_id=random.choice(product_ids),
+                        quantity=random.randint(1, 5),
+                        unit_price=round(random.uniform(10.0, 500.0), 2),
+                    )
                 )
-                session.add(item)
 
             if i % 1000 == 0:
                 await session.commit()
                 print(f"  Создано заказов: {i}/10000")
 
         await session.commit()
-        print("✓ База данных успешно заполнена!")
-
-
-async def main():
-    await seed_data()
+        print("✓ База данных заполнена")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(seed_data())
