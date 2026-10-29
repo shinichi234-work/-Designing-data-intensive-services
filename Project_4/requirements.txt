@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+asyncpg
+redis
+locust
+requests
+pandas
+matplotlib
