@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+asyncpg
+redis
+aiokafka
+celery
+locust
+requests
+pandas
+matplotlib

@@ -5,6 +5,15 @@ Scripts/
 pyvenv.cfg
 __pycache__/
 *.pyc
+
+.env
+*.log
+
+# Отчеты и файлы Locust
+locust_stats*
+*.csv
+*.html
+
 .idea/
 .vscode/
 .DS_Store

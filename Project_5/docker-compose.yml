@@ -1,0 +1,177 @@
+x-app: &app-base
+  build: .
+  environment:
+    DATABASE_URL: postgresql+asyncpg://shop:shop@postgres-primary:5432/shop
+    REDIS_HOST: redis
+    REDIS_BROKER_HOST: redis-broker
+    KAFKA_BOOTSTRAP: kafka:29092
+  depends_on:
+    init-db:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app1
+      - app2
+      - app3
+
+  init-db:
+    build: .
+    command: python -m app.init_db
+    environment:
+      DATABASE_URL: postgresql+asyncpg://shop:shop@postgres-primary:5432/shop
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+
+  app1:
+    <<: *app-base
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  app2:
+    <<: *app-base
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  app3:
+    <<: *app-base
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  outbox-publisher:
+    <<: *app-base
+    command: python -m app.outbox_publisher
+    depends_on:
+      init-db:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: on-failure
+
+  consumer-analytics:
+    <<: *app-base
+    command: python -m app.consumers analytics
+    depends_on:
+      init-db:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: on-failure
+
+  consumer-notifications:
+    <<: *app-base
+    command: python -m app.consumers notifications
+    depends_on:
+      init-db:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: on-failure
+
+  celery-worker:
+    <<: *app-base
+    command: celery -A app.tasks worker --loglevel=info
+    depends_on:
+      redis-broker:
+        condition: service_healthy
+    restart: on-failure
+
+  postgres-primary:
+    image: postgres:16-alpine
+    container_name: postgres-primary
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: shop
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis-broker:
+    image: redis:7-alpine
+    container_name: redis-broker
+    command: redis-server --maxmemory-policy noeviction --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:29092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order.created --partitions 3 --replication-factor 1 --config retention.ms=604800000 &&
+       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order.paid --partitions 3 --replication-factor 1 --config retention.ms=604800000 &&
+       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order.shipped --partitions 3 --replication-factor 1 --config retention.ms=2592000000 &&
+       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic order.dlq --partitions 1 --replication-factor 1 --config retention.ms=2592000000"
+
+volumes:
+  pgdata:

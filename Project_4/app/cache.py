@@ -37,7 +37,6 @@ async def invalidate(key: str) -> None:
 
 
 async def invalidate_pattern(pattern: str) -> None:
-    # SCAN вместо KEYS: не блокирует Redis
     try:
         async for key in redis_client.scan_iter(match=pattern, count=100):
             await redis_client.delete(key)
@@ -46,7 +45,6 @@ async def invalidate_pattern(pattern: str) -> None:
 
 
 async def cached(key: str, ttl: int, fetch_fn: Callable, lock_timeout: int = 10):
-    """Cache-Aside с mutex-защитой от cache stampede."""
     cached_value = await get_json(key)
     if cached_value is not None:
         return cached_value
